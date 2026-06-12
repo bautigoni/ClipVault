@@ -1,7 +1,33 @@
-import { Download, Github, Sparkles, Zap, Lock, ChevronRight } from "lucide-react";
-import { REPO_URL, INSTALLER_URL } from "../lib/config";
+import { useState } from "react";
+import { Download, Github, Sparkles, Zap, Lock, ChevronRight, ExternalLink } from "lucide-react";
+import { REPO_URL, RELEASES_URL, INSTALLER_URL } from "../lib/config";
 
 const GITHUB_URL = REPO_URL;
+
+function DownloadInstallerLink({
+  className,
+  children,
+}: {
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const [failed, setFailed] = useState(false);
+  const href = failed ? RELEASES_URL : INSTALLER_URL;
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      onClick={() => window.setTimeout(() => setFailed(true), 1500)}
+      className={className}
+    >
+      {children}
+      {failed && (
+        <ExternalLink className="ml-1 inline h-3.5 w-3.5 align-text-bottom opacity-70" />
+      )}
+    </a>
+  );
+}
 
 export function Hero() {
   return (
@@ -40,16 +66,11 @@ export function Hero() {
             className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row animate-fade-in-up"
             style={{ animationDelay: "0.3s", animationFillMode: "both" }}
           >
-            <a
-              href={INSTALLER_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="btn-primary animate-pulse-glow"
-            >
+            <DownloadInstallerLink className="btn-primary animate-pulse-glow">
               <Download className="h-4 w-4" />
               Download for Windows
               <ChevronRight className="h-4 w-4" />
-            </a>
+            </DownloadInstallerLink>
             <a href={GITHUB_URL} target="_blank" rel="noreferrer" className="btn-ghost">
               <Github className="h-4 w-4" />
               View on GitHub

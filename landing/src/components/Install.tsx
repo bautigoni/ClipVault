@@ -1,8 +1,51 @@
-import { Download, Github, Check, Copy, Terminal } from "lucide-react";
+import { Download, Github, Check, Copy, Terminal, ExternalLink } from "lucide-react";
 import { useState } from "react";
-import { REPO_URL, INSTALLER_URL, INSTALLER_FILENAME } from "../lib/config";
+import { REPO_URL, RELEASES_URL, INSTALLER_URL, INSTALLER_FILENAME } from "../lib/config";
 
 const GITHUB_URL = REPO_URL;
+
+/**
+ * A download button that uses the configured direct installer URL. If the
+ * user already installed a previous version, the browser will start the
+ * download immediately. If the asset 404s (e.g. a tagged release hasn't
+ * been published yet), we fall back to the GitHub releases page so the
+ * user can grab whatever's there.
+ */
+function DownloadInstallerLink({
+  className,
+  primary = false,
+  children,
+}: {
+  className?: string;
+  primary?: boolean;
+  children: React.ReactNode;
+}) {
+  const [failed, setFailed] = useState(false);
+  const href = failed ? RELEASES_URL : INSTALLER_URL;
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      onClick={() => {
+        // If the GitHub release 404s, the download won't start — open the
+        // releases page in a new tab so the user always lands somewhere
+        // useful. The other button (and the link's `href`) fall back
+        // gracefully on the next click as well.
+        // We optimistically flip `failed` after a short delay; if the
+        // browser blocked the navigation (e.g. popup blocker), the
+        // releases tab is still a better landing than a dead `data:`.
+        window.setTimeout(() => setFailed(true), 1500);
+      }}
+      className={className}
+    >
+      {children}
+      {failed && (
+        <ExternalLink className="ml-1 inline h-3.5 w-3.5 align-text-bottom opacity-70" />
+      )}
+    </a>
+  );
+}
 
 export function Install() {
   return (
@@ -22,12 +65,7 @@ export function Install() {
           </div>
 
           <div className="mt-12 grid gap-4 sm:grid-cols-2">
-            <a
-              href={INSTALLER_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="card group flex flex-col items-start hover:border-accent/50"
-            >
+            <DownloadInstallerLink className="card group flex flex-col items-start hover:border-accent/50">
               <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-lg bg-accent text-white shadow-lg shadow-accent/30">
                 <Download className="h-5 w-5" />
               </div>
@@ -42,7 +80,7 @@ export function Install() {
               <div className="mt-3 self-end text-sm font-semibold text-accent transition-transform duration-200 group-hover:translate-x-1">
                 Download now →
               </div>
-            </a>
+            </DownloadInstallerLink>
 
             <a
               href={GITHUB_URL}
@@ -88,15 +126,10 @@ export function Install() {
           </ol>
 
           <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <a
-              href={INSTALLER_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="btn-primary"
-            >
+            <DownloadInstallerLink primary className="btn-primary">
               <Download className="h-4 w-4" />
               Download for Windows
-            </a>
+            </DownloadInstallerLink>
             <a href={GITHUB_URL} target="_blank" rel="noreferrer" className="btn-ghost">
               <Github className="h-4 w-4" />
               Star on GitHub

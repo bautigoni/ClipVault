@@ -1,8 +1,38 @@
 import { useEffect, useState } from "react";
-import { Github, Download, Menu, X } from "lucide-react";
-import { REPO_URL, INSTALLER_URL, INSTALLER_FILENAME } from "../lib/config";
+import { Github, Download, Menu, X, ExternalLink } from "lucide-react";
+import { REPO_URL, RELEASES_URL, INSTALLER_URL } from "../lib/config";
 
 const GITHUB_URL = REPO_URL;
+
+/**
+ * Same fallback strategy as in `Install.tsx` — if the direct installer
+ * link 404s (e.g. no release published yet for this commit), fall back
+ * to the GitHub releases page so the user can pick an asset manually.
+ */
+function DownloadInstallerLink({
+  className,
+  children,
+}: {
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const [failed, setFailed] = useState(false);
+  const href = failed ? RELEASES_URL : INSTALLER_URL;
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      onClick={() => window.setTimeout(() => setFailed(true), 1500)}
+      className={className}
+    >
+      {children}
+      {failed && (
+        <ExternalLink className="ml-1 inline h-3.5 w-3.5 align-text-bottom opacity-70" />
+      )}
+    </a>
+  );
+}
 
 export function Nav() {
   const [scrolled, setScrolled] = useState(false);
@@ -60,10 +90,10 @@ export function Nav() {
             <Github className="h-4 w-4" />
             <span>Star</span>
           </a>
-          <a href={INSTALLER_URL} target="_blank" rel="noreferrer" className="btn-primary">
+          <DownloadInstallerLink className="btn-primary">
             <Download className="h-4 w-4" />
             Download
-          </a>
+          </DownloadInstallerLink>
         </div>
 
         <button
@@ -99,10 +129,10 @@ export function Nav() {
                 <Github className="h-4 w-4" />
                 GitHub
               </a>
-              <a href={INSTALLER_URL} target="_blank" rel="noreferrer" className="btn-primary w-full">
+              <DownloadInstallerLink className="btn-primary w-full">
                 <Download className="h-4 w-4" />
                 Download for Windows
-              </a>
+              </DownloadInstallerLink>
             </div>
           </div>
         </div>
