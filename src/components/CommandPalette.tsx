@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
-import { Search, FileText, Image as ImageIcon, Files, Link2, Star, Pin, Combine, X, Wand2 } from "lucide-react";
+import { Search, FileText, Image as ImageIcon, Files, Link2, Star, Pin, Combine, X, Wand2, ZoomIn } from "lucide-react";
 import { api, type TextTransformKind, type TransformResult } from "@/lib/tauri";
 import { debounce, relativeDateGroup } from "@/lib/utils";
 import type { Clip } from "@/types";
@@ -399,6 +399,116 @@ function PaletteRow({
           <TransformMenu clipId={clip.id} preview={clip.text_preview ?? ""} />
         )}
       </div>
+      {clip.type === "image" && clip.image && (
+        <ImagePreviewPopover clip={clip} />
+      )}
+    </div>
+  );
+}
+
+/// Hover-preview popover for image clips. Shows the FULL image (not the
+/// thumbnail) on hover, so the user can actually see the screenshot they
+/// copied without having to paste it somewhere first. The full image bytes
+/// are loaded on demand and revoked on unmount to avoid leaking memory.
+function ImagePreviewPopover({ clip }: { clip: Clip }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Lazy-load the full image the first time the user actually hovers the
+  // popover trigger. This keeps the palette fast when scrolling: only the
+  // visible image rows ever pay the cost of fetching the full image.
+  useEffect(() => {
+    if (!open || url || loading || !clip.image) return;
+    let active = true;
+    let createdUrl: string | null = null;
+    setLoading(true);
+    api
+      .readImageFull(clip.image.path)
+      .then((bytes) => {
+        if (!active) return;
+        const arr = bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : new Uint8Array(bytes);
+        const mime = clip.image?.mime === "image/png" ? "image/png" : "image/jpeg";
+        const blob = new Blob([arr], { type: mime });
+        createdUrl = URL.createObjectURL(blob);
+        setUrl(createdUrl);
+      })
+      .catch(() => {
+        /* silent — falls back to the small thumb */
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+      // Note: we DO NOT revoke the URL here on purpose — the same image may
+      // be hovered multiple times and we want to avoid re-fetching from
+      // disk. The URL is revoked when the component unmounts (parent
+      // `PaletteRow` changes clips).
+    };
+  }, [open, url, loading, clip.image]);
+
+  // Revoke on full unmount only.
+  useEffect(() => {
+    return () => {
+      if (url) URL.revokeObjectURL(url);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (!clip.image) return null;
+  return (
+    <div
+      ref={containerRef}
+      className="relative ml-2"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        title="Preview image"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+        className="rounded p-1 text-fg-muted transition-colors hover:bg-bg-overlay hover:text-fg"
+      >
+        <ZoomIn className="h-3.5 w-3.5" />
+      </button>
+      {open && (
+        <div
+          className="absolute right-0 top-full z-50 mt-1 max-h-[70vh] max-w-[min(640px,80vw)] overflow-auto rounded-md border border-border bg-bg-elevated p-2 shadow-2xl"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {loading && !url && (
+            <div className="flex h-40 w-72 items-center justify-center text-xs text-fg-muted">
+              Loading full image…
+            </div>
+          )}
+          {url ? (
+            <img
+              src={url}
+              alt={clip.text_preview ?? "clip image"}
+              className="block max-w-full rounded"
+              draggable={false}
+            />
+          ) : !loading ? (
+            <div className="flex h-40 w-72 items-center justify-center text-xs text-fg-muted">
+              Couldn't load full image
+            </div>
+          ) : null}
+          {clip.image && (
+            <div className="mt-2 flex items-center justify-between text-[10px] text-fg-muted">
+              <span>
+                {clip.image.width}×{clip.image.height}
+              </span>
+              <span className="truncate">{clip.source_app ?? "unknown source"}</span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
