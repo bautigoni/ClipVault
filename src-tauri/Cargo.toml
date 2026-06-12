@@ -20,16 +20,18 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [features]
-# Phase 6: feature-gated OCR. Disabling keeps the default binary small.
+# OCR via Windows.Media.Ocr (Win10/11 built-in). No external model download.
 ocr = []
-# Phase 5: portable mode (in-place DB storage next to the executable)
+# Portable mode (compile-time hint, in addition to the runtime `portable.flag`
+# file check). The runtime check works regardless of this feature flag.
 portable = []
-# Phase 6: opt-in self-hosted sync
+# Opt-in self-hosted LAN sync
 sync = []
-# Phase 6: opt-in local HTTP receiver for browser extension
+# Opt-in local HTTP receiver (browser extension)
 http_receiver = []
-# Default: production-ready
-default = []
+# Default: production-ready. OCR + portable are baked in; sync and the HTTP
+# receiver stay opt-in.
+default = ["ocr", "portable"]
 
 [dependencies]
 # Tauri v2 core + plugins

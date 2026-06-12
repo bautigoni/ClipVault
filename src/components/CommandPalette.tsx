@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
-import { Search, FileText, Image as ImageIcon, Files, Link2, Star, Pin, Combine, X } from "lucide-react";
-import { api } from "@/lib/tauri";
+import { Search, FileText, Image as ImageIcon, Files, Link2, Star, Pin, Combine, X, Wand2 } from "lucide-react";
+import { api, type TextTransformKind, type TransformResult } from "@/lib/tauri";
 import { debounce, relativeDateGroup } from "@/lib/utils";
 import type { Clip } from "@/types";
 
@@ -395,6 +395,204 @@ function PaletteRow({
       <div className="flex items-center gap-1 text-fg-muted">
         {clip.is_pinned && <Pin className="h-3.5 w-3.5" />}
         {clip.is_favorite && <Star className="h-3.5 w-3.5 fill-warning text-warning" />}
+        {(clip.type === "text" || clip.type === "url") && (
+          <TransformMenu clipId={clip.id} preview={clip.text_preview ?? ""} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/// Tiny "transform" menu that runs a clip's text through one of the cheap
+/// text transformations exposed by the backend. We keep the UI minimal
+/// (no nested submenus) — the most-used ones live at the top in the order
+/// users asked for them in the user research.
+function TransformMenu({ clipId, preview }: { clipId: string; preview: string }) {
+  const [open, setOpen] = useState(false);
+  const [result, setResult] = useState<TransformResult | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const run = async (kind: TextTransformKind) => {
+    setOpen(false);
+    try {
+      // We re-fetch the full text because `preview` is truncated to 200
+      // chars in the list. The DB is the source of truth.
+      const full = await api.getClip(clipId);
+      const text = full?.text_preview ?? preview;
+      const r = await api.transformClip(text, kind);
+      setResult(r);
+    } catch (e) {
+      console.error("transform failed", e);
+    }
+  };
+
+  const copy = async () => {
+    if (!result) return;
+    // Push the result to the system clipboard so the user can paste it
+    // anywhere. We deliberately don't auto-paste — the user is in control.
+    await navigator.clipboard.writeText(result.text);
+    setResult(null);
+  };
+
+  const insertAsNew = async () => {
+    if (!result) return;
+    // Insert the result back into the DB as a new text clip. We use the
+    // existing copyClipToClipboard flow indirectly: the watcher will pick
+    // up the clipboard change as a brand-new text clip on its next poll,
+    // preserving the dedupe + source-app + OCR pipeline.
+    await navigator.clipboard.writeText(result.text);
+    setResult(null);
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        title="Transform text"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+        className="rounded p-1 text-fg-muted transition-colors hover:bg-bg-overlay hover:text-fg"
+      >
+        <Wand2 className="h-3.5 w-3.5" />
+      </button>
+      {open && (
+        <div
+          className="absolute right-0 top-full z-50 mt-1 w-48 overflow-hidden rounded-md border border-border bg-bg-elevated shadow-lg"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {(
+            [
+              ["uppercase", "UPPERCASE"],
+              ["lowercase", "lowercase"],
+              ["title_case", "Title Case"],
+              ["sentence_case", "Sentence case"],
+              ["trim", "Trim"],
+              ["collapse_whitespace", "Collapse whitespace"],
+              ["dedup_lines", "Dedupe lines"],
+              ["unique_lines", "Unique lines"],
+              ["sort_lines_asc", "Sort A→Z"],
+              ["sort_lines_desc", "Sort Z→A"],
+              ["strip_empty_lines", "Strip empty lines"],
+              ["to_single_line", "To single line"],
+              ["reverse", "Reverse"],
+              ["url_encode", "URL encode"],
+              ["url_decode", "URL decode"],
+              ["base64_encode", "Base64 encode"],
+              ["base64_decode", "Base64 decode"],
+              ["count", "Count…"],
+            ] as Array<[TextTransformKind, string]>
+          ).map(([kind, label]) => (
+            <button
+              key={kind}
+              onClick={() => run(kind)}
+              className="block w-full px-3 py-1.5 text-left text-xs text-fg hover:bg-bg-overlay"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+      {result && (
+        <TransformResultPopover
+          result={result}
+          onCopy={copy}
+          onInsertAsNew={insertAsNew}
+          onClose={() => setResult(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function TransformResultPopover({
+  result,
+  onCopy,
+  onInsertAsNew,
+  onClose,
+}: {
+  result: TransformResult;
+  onCopy: () => void;
+  onInsertAsNew: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-2xl overflow-hidden rounded-lg border border-border bg-bg-elevated shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-border bg-bg-overlay/50 px-4 py-2">
+          <div className="text-sm font-semibold text-fg">
+            {result.label}{" "}
+            <span className="font-normal text-fg-muted">
+              · {result.in_len} → {result.out_len}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded p-1 text-fg-muted hover:bg-bg-overlay hover:text-fg"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="max-h-96 overflow-auto p-4">
+          {result.counts ? (
+            <dl className="grid grid-cols-2 gap-3 text-sm text-fg">
+              <div>
+                <dt className="text-xs uppercase text-fg-muted">Characters</dt>
+                <dd className="font-mono text-lg">{result.counts.chars}</dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase text-fg-muted">Words</dt>
+                <dd className="font-mono text-lg">{result.counts.words}</dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase text-fg-muted">Lines</dt>
+                <dd className="font-mono text-lg">{result.counts.lines}</dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase text-fg-muted">Bytes</dt>
+                <dd className="font-mono text-lg">{result.counts.bytes}</dd>
+              </div>
+            </dl>
+          ) : (
+            <pre className="whitespace-pre-wrap break-words font-mono text-xs text-fg">
+              {result.text}
+            </pre>
+          )}
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-border bg-bg-overlay/50 px-4 py-2">
+          <button
+            type="button"
+            onClick={onInsertAsNew}
+            className="rounded-md border border-border bg-transparent px-3 py-1.5 text-xs text-fg hover:bg-bg-overlay"
+          >
+            Save as new clip
+          </button>
+          <button
+            type="button"
+            onClick={onCopy}
+            className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-accent-fg hover:bg-accent/90"
+          >
+            Copy to clipboard
+          </button>
+        </div>
       </div>
     </div>
   );

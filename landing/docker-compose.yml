@@ -1,0 +1,23 @@
+services:
+  landing:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: clipvault-landing:latest
+    container_name: clipvault-landing
+    restart: unless-stopped
+    # Match the pattern of every other app on the host: bind only to
+    # loopback on a dedicated port so nginx (the host reverse proxy) can
+    # reach it. Never expose to 0.0.0.0 — that's what nginx is for.
+    ports:
+      - "127.0.0.1:3008:3000"
+    # Healthcheck is cheap and lets `docker ps` show when the container
+    # is actually serving content (vs just "Up").
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # The build context is the directory that contains docker-compose.yml
+    # and the static `site/` folder. Run: `docker compose up -d --build`.

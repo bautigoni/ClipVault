@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use arboard::Clipboard;
-use serde::Deserialize;
-use tauri::{AppHandle, Manager, State};
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 use tracing::info;
 
@@ -743,4 +743,554 @@ pub async fn ring_remove_from_set(
 pub async fn test_paste() -> Result<(), String> {
     crate::paste::send_ctrl_v();
     Ok(())
+}
+
+/// Open the Windows 10/11 screen-snipping tool (the same UI as `Win+Shift+S`).
+/// The captured region lands in the clipboard, so the watcher records it
+/// automatically as a new image clip — no special-casing needed. We just
+/// inject the chord and return; the user is in control of what gets snipped.
+#[tauri::command]
+pub async fn trigger_screenshot() -> Result<(), String> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VIRTUAL_KEY,
+        VK_LWIN, VK_S, VK_SHIFT,
+    };
+
+    /// Tiny builder so we don't repeat the union dance six times.
+    fn keybd(vk: VIRTUAL_KEY, up: bool) -> INPUT {
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    dwFlags: if up { KEYEVENTF_KEYUP } else { Default::default() },
+                    ..Default::default()
+                },
+            },
+        }
+    }
+
+    let downs = [
+        keybd(VK_LWIN, false),
+        keybd(VK_SHIFT, false),
+        keybd(VK_S, false),
+    ];
+    let ups = [
+        keybd(VK_S, true),
+        keybd(VK_SHIFT, true),
+        keybd(VK_LWIN, true),
+    ];
+    unsafe {
+        SendInput(&downs, std::mem::size_of::<INPUT>() as i32);
+        SendInput(&ups, std::mem::size_of::<INPUT>() as i32);
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Text transformations
+// ---------------------------------------------------------------------------
+//
+// Cheap, pure-function operations on text. They take a string + a transform
+// kind and return the transformed string. The frontend calls them via the
+// `transformClip` command and shows a small menu of options next to each
+// text clip in the palette. The result is *not* auto-pasted — it lands in
+// the clipboard and the user presses Enter again to paste, so we never
+// surprise them with a paste they didn't ask for.
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextTransform {
+    Uppercase,
+    Lowercase,
+    TitleCase,
+    SentenceCase,
+    Trim,
+    CollapseWhitespace,
+    DedupLines,
+    SortLinesAsc,
+    SortLinesDesc,
+    UniqueLines,
+    Reverse,
+    StripEmptyLines,
+    ToSingleLine,
+    UrlEncode,
+    UrlDecode,
+    Base64Encode,
+    Base64Decode,
+    Count,
+}
+
+impl TextTransform {
+    fn label(&self) -> &'static str {
+        match self {
+            TextTransform::Uppercase => "UPPERCASE",
+            TextTransform::Lowercase => "lowercase",
+            TextTransform::TitleCase => "Title Case",
+            TextTransform::SentenceCase => "Sentence case",
+            TextTransform::Trim => "Trim",
+            TextTransform::CollapseWhitespace => "Collapse whitespace",
+            TextTransform::DedupLines => "Dedupe lines",
+            TextTransform::SortLinesAsc => "Sort A→Z",
+            TextTransform::SortLinesDesc => "Sort Z→A",
+            TextTransform::UniqueLines => "Unique lines",
+            TextTransform::Reverse => "Reverse",
+            TextTransform::StripEmptyLines => "Strip empty lines",
+            TextTransform::ToSingleLine => "To single line",
+            TextTransform::UrlEncode => "URL encode",
+            TextTransform::UrlDecode => "URL decode",
+            TextTransform::Base64Encode => "Base64 encode",
+            TextTransform::Base64Decode => "Base64 decode",
+            TextTransform::Count => "Count",
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TransformRequest {
+    pub text: String,
+    pub kind: TextTransform,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TransformResult {
+    /// The transformed text. For the `Count` kind this is empty.
+    pub text: String,
+    /// A short, human-readable label of what was applied.
+    pub label: String,
+    /// Length of the input in characters, returned so the UI can show
+    /// "1234 chars → 1234 chars" or "200 → 80" for the count kind.
+    pub in_len: usize,
+    /// Length of the output. Same as in_len for the Count kind.
+    pub out_len: usize,
+    /// For the Count kind, the structured count payload (chars, words, lines).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub counts: Option<Counts>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Counts {
+    pub chars: usize,
+    pub words: usize,
+    pub lines: usize,
+    pub bytes: usize,
+}
+
+fn apply_transform(text: &str, kind: &TextTransform) -> String {
+    use TextTransform::*;
+    match kind {
+        Uppercase => text.to_uppercase(),
+        Lowercase => text.to_lowercase(),
+        TitleCase => title_case(text),
+        SentenceCase => sentence_case(text),
+        Trim => text.trim().to_string(),
+        CollapseWhitespace => collapse_whitespace(text),
+        DedupLines => dedup_lines(text, false),
+        UniqueLines => dedup_lines(text, true),
+        SortLinesAsc => sort_lines(text, false),
+        SortLinesDesc => sort_lines(text, true),
+        Reverse => text.chars().rev().collect(),
+        StripEmptyLines => text
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        ToSingleLine => text.split_whitespace().collect::<Vec<_>>().join(" "),
+        UrlEncode => url_encode(text),
+        UrlDecode => url_decode(text),
+        Base64Encode => base64_encode(text),
+        Base64Decode => base64_decode(text),
+        Count => String::new(),
+    }
+}
+
+fn title_case(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut at_word_start = true;
+    for c in s.chars() {
+        if c.is_whitespace() {
+            at_word_start = true;
+            out.push(c);
+        } else if at_word_start {
+            for u in c.to_uppercase() {
+                out.push(u);
+            }
+            at_word_start = false;
+        } else {
+            for u in c.to_lowercase() {
+                out.push(u);
+            }
+        }
+    }
+    out
+}
+
+fn sentence_case(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut at_sentence_start = true;
+    for c in s.chars() {
+        if matches!(c, '.' | '!' | '?' | '\n') {
+            at_sentence_start = true;
+            for u in c.to_lowercase() {
+                out.push(u);
+            }
+        } else if at_sentence_start && c.is_alphabetic() {
+            for u in c.to_uppercase() {
+                out.push(u);
+            }
+            at_sentence_start = false;
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn collapse_whitespace(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut last_was_space = false;
+    for c in s.chars() {
+        if c.is_whitespace() {
+            if !last_was_space {
+                out.push(' ');
+            }
+            last_was_space = true;
+        } else {
+            out.push(c);
+            last_was_space = false;
+        }
+    }
+    out
+}
+
+fn dedup_lines(s: &str, unique_only: bool) -> String {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = String::with_capacity(s.len());
+    for line in s.lines() {
+        if unique_only {
+            if seen.insert(line.to_string()) {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(line);
+            }
+        } else {
+            if !seen.insert(line.to_string()) {
+                continue;
+            }
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(line);
+        }
+    }
+    out
+}
+
+fn sort_lines(s: &str, reverse: bool) -> String {
+    let mut lines: Vec<&str> = s.lines().collect();
+    lines.sort_by(|a, b| {
+        if reverse {
+            b.cmp(a)
+        } else {
+            a.cmp(b)
+        }
+    });
+    let mut out = String::with_capacity(s.len());
+    for (i, l) in lines.iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        out.push_str(l);
+    }
+    out
+}
+
+fn url_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
+}
+
+fn url_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(h), Some(l)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                out.push((h << 4) | l);
+                i += 3;
+                continue;
+            }
+        }
+        if bytes[i] == b'+' {
+            out.push(b' ');
+            i += 1;
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
+// base64 uses an external crate, but we can implement a minimal
+// implementation here without adding a dep. Kept simple — no streaming,
+// no URL-safe variants, no multi-line output.
+const B64_ALPHABET: &[u8; 64] =
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+fn base64_encode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    let mut i = 0;
+    while i + 3 <= bytes.len() {
+        let n = ((bytes[i] as u32) << 16) | ((bytes[i + 1] as u32) << 8) | (bytes[i + 2] as u32);
+        out.push(B64_ALPHABET[((n >> 18) & 0x3F) as usize] as char);
+        out.push(B64_ALPHABET[((n >> 12) & 0x3F) as usize] as char);
+        out.push(B64_ALPHABET[((n >> 6) & 0x3F) as usize] as char);
+        out.push(B64_ALPHABET[(n & 0x3F) as usize] as char);
+        i += 3;
+    }
+    let rem = bytes.len() - i;
+    if rem == 1 {
+        let n = (bytes[i] as u32) << 16;
+        out.push(B64_ALPHABET[((n >> 18) & 0x3F) as usize] as char);
+        out.push(B64_ALPHABET[((n >> 12) & 0x3F) as usize] as char);
+        out.push('=');
+        out.push('=');
+    } else if rem == 2 {
+        let n = ((bytes[i] as u32) << 16) | ((bytes[i + 1] as u32) << 8);
+        out.push(B64_ALPHABET[((n >> 18) & 0x3F) as usize] as char);
+        out.push(B64_ALPHABET[((n >> 12) & 0x3F) as usize] as char);
+        out.push(B64_ALPHABET[((n >> 6) & 0x3F) as usize] as char);
+        out.push('=');
+    }
+    out
+}
+
+fn b64_val(b: u8) -> Option<u8> {
+    match b {
+        b'A'..=b'Z' => Some(b - b'A'),
+        b'a'..=b'z' => Some(b - b'a' + 26),
+        b'0'..=b'9' => Some(b - b'0' + 52),
+        b'+' => Some(62),
+        b'/' => Some(63),
+        _ => None,
+    }
+}
+
+fn base64_decode(s: &str) -> String {
+    // Strip padding for length math, then iterate over 4-char groups.
+    let trimmed: Vec<u8> = s.bytes().filter(|b| *b != b'=' && !b.is_ascii_whitespace()).collect();
+    let mut out = Vec::with_capacity(trimmed.len() * 3 / 4);
+    let mut i = 0;
+    while i + 4 <= trimmed.len() {
+        let v0 = b64_val(trimmed[i]).unwrap_or(0);
+        let v1 = b64_val(trimmed[i + 1]).unwrap_or(0);
+        let v2 = b64_val(trimmed[i + 2]).unwrap_or(0);
+        let v3 = b64_val(trimmed[i + 3]).unwrap_or(0);
+        let n = ((v0 as u32) << 18) | ((v1 as u32) << 12) | ((v2 as u32) << 6) | (v3 as u32);
+        out.push((n >> 16) as u8);
+        out.push((n >> 8) as u8);
+        out.push(n as u8);
+        i += 4;
+    }
+    let rem = trimmed.len() - i;
+    if rem == 2 {
+        let v0 = b64_val(trimmed[i]).unwrap_or(0);
+        let v1 = b64_val(trimmed[i + 1]).unwrap_or(0);
+        let n = ((v0 as u32) << 18) | ((v1 as u32) << 12);
+        out.push((n >> 16) as u8);
+    } else if rem == 3 {
+        let v0 = b64_val(trimmed[i]).unwrap_or(0);
+        let v1 = b64_val(trimmed[i + 1]).unwrap_or(0);
+        let v2 = b64_val(trimmed[i + 2]).unwrap_or(0);
+        let n = ((v0 as u32) << 18) | ((v1 as u32) << 12) | ((v2 as u32) << 6);
+        out.push((n >> 16) as u8);
+        out.push((n >> 8) as u8);
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+#[tauri::command]
+pub async fn transform_clip(req: TransformRequest) -> Result<TransformResult, String> {
+    let in_len = req.text.chars().count();
+    let label = req.kind.label().to_string();
+    let counts = if matches!(req.kind, TextTransform::Count) {
+        Some(Counts {
+            chars: in_len,
+            words: req.text.split_whitespace().count(),
+            lines: req.text.lines().count(),
+            bytes: req.text.len(),
+        })
+    } else {
+        None
+    };
+    let out = apply_transform(&req.text, &req.kind);
+    let out_len = out.chars().count();
+    Ok(TransformResult {
+        text: out,
+        label,
+        in_len,
+        out_len,
+        counts,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Drag-and-drop file ingest
+// ---------------------------------------------------------------------------
+//
+// The main window's file drop handler in the frontend calls this command with
+// the list of file paths the user dragged onto the app. We register a single
+// `files` clip with all paths attached, and emit `clip://updated` so the
+// palette refreshes itself. Identical to what `record_files` does for native
+// clipboard file drops, but callable from a UI gesture.
+
+#[tauri::command]
+pub async fn ingest_dropped_files(
+    app: AppHandle,
+    state: State<'_, AppStateHandle>,
+    paths: Vec<String>,
+) -> Result<String, String> {
+    if paths.is_empty() {
+        return Err("no paths provided".into());
+    }
+    // Filter out anything that doesn't exist on disk — Tauri gives us the
+    // raw paths, but a user could have moved the file mid-drag or the path
+    // could be junk. We keep the empty-list as an error so the UI can show
+    // a "couldn't import" toast.
+    let valid: Vec<String> = paths
+        .into_iter()
+        .filter(|p| std::path::Path::new(p).exists())
+        .collect();
+    if valid.is_empty() {
+        return Err("none of the dropped paths exist on disk".into());
+    }
+
+    let now = repo::now_ms();
+    let json = serde_json::to_string(&valid).map_err(err)?;
+    let total_size: i64 = valid
+        .iter()
+        .filter_map(|p| std::fs::metadata(p).ok())
+        .map(|m| m.len() as i64)
+        .sum();
+    let preview = valid.iter().take(3).cloned().collect::<Vec<_>>().join(", ");
+    let hash = blake3::hash(json.as_bytes()).to_hex().to_string();
+
+    let conn = state.db.get().map_err(err)?;
+    if let Some(existing) = repo::find_recent_duplicate(
+        &conn,
+        &hash,
+        crate::clipboard::DEDUPE_WINDOW_MS,
+        now,
+    )
+    .map_err(err)?
+    {
+        repo::bump_usage(&conn, &existing, now).map_err(err)?;
+        let _ = app.emit("clip://updated", serde_json::json!({ "id": existing }));
+        return Ok(existing);
+    }
+    let id = repo::insert_clip(
+        &conn,
+        "files",
+        &hash,
+        Some(&preview),
+        total_size,
+        Some("drop"),
+        None,
+        now,
+    )
+    .map_err(err)?;
+    repo::attach_files(&conn, &id, &json).map_err(err)?;
+    drop(conn);
+    let _ = app.emit("clip://updated", serde_json::json!({ "id": id }));
+    Ok(id)
+}
+
+// ---------------------------------------------------------------------------
+// OCR on image clips
+// ---------------------------------------------------------------------------
+//
+// Runs the Windows built-in OCR engine over the image bytes of a stored
+// image clip, then writes the recognized text into the `clip_ocr` table
+// so the frontend can show a "Text in image" tab. The watcher calls this
+// in the background right after `record_image` returns.
+
+#[tauri::command]
+pub async fn ocr_clip(
+    state: State<'_, AppStateHandle>,
+    clip_id: String,
+) -> Result<Option<String>, String> {
+    let conn = state.db.get().map_err(err)?;
+    let rel: Option<String> = conn
+        .query_row(
+            "SELECT path FROM images WHERE clip_id = ?",
+            rusqlite::params![clip_id],
+            |r| r.get(0),
+        )
+        .ok();
+    let Some(rel) = rel else {
+        return Ok(None);
+    };
+    drop(conn);
+    let bytes = crate::images::storage::load_full(&state.data_dir, &rel).map_err(err)?;
+    match crate::ocr::recognize(&bytes) {
+        Ok(text) if !text.trim().is_empty() => {
+            let conn = state.db.get().map_err(err)?;
+            crate::db::repo::save_ocr(&conn, &clip_id, &text, repo::now_ms()).map_err(err)?;
+            Ok(Some(text))
+        }
+        Ok(_) => Ok(None),
+        Err(e) => {
+            tracing::warn!(?e, "ocr_clip: engine returned no text");
+            Ok(None)
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn ocr_get(
+    state: State<'_, AppStateHandle>,
+    clip_id: String,
+) -> Result<Option<String>, String> {
+    let conn = state.db.get().map_err(err)?;
+    crate::db::repo::load_ocr(&conn, &clip_id).map_err(err)
+}
+
+// ---------------------------------------------------------------------------
+// Activity log
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn list_activity(
+    state: State<'_, AppStateHandle>,
+    limit: Option<i64>,
+) -> Result<Vec<repo::ActivityEntry>, String> {
+    let conn = state.db.get().map_err(err)?;
+    repo::list_activity(&conn, limit.unwrap_or(200).clamp(1, 1000)).map_err(err)
+}
+
+#[tauri::command]
+pub async fn clear_activity(state: State<'_, AppStateHandle>) -> Result<(), String> {
+    let conn = state.db.get().map_err(err)?;
+    repo::clear_activity(&conn).map_err(err)
 }

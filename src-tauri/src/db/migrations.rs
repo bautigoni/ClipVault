@@ -9,7 +9,7 @@ use tracing::info;
 use super::{DbConn, DbPool};
 
 #[allow(dead_code)]
-const CURRENT_VERSION: i32 = 2;
+const CURRENT_VERSION: i32 = 3;
 
 pub struct Migration {
     pub version: i32,
@@ -27,6 +27,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 2,
         name: "clipboard_ring",
         sql: RING_SCHEMA,
+    },
+    Migration {
+        version: 3,
+        name: "activity_log",
+        sql: ACTIVITY_SCHEMA,
     },
 ];
 
@@ -223,4 +228,23 @@ CREATE TABLE IF NOT EXISTS ring_set_configs (
 
 -- Per-clip ring metadata (so kind / collection filtering is index-friendly)
 CREATE INDEX IF NOT EXISTS idx_clips_kind_created ON clips(type, created_at DESC);
+"#;
+
+/// Append-only activity log: every interesting thing the app does lands here
+/// (clip created, clip copied, clip deleted, settings changed, hotkey fired,
+/// OCR finished, ...). Powers the in-app "Activity" view so the user can see
+/// what happened and when. We never log clipboard *content* — only metadata
+/// (clip id, source app, byte size, action kind) — to keep the log safe to
+/// share for debugging without leaking secrets.
+const ACTIVITY_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS activity_log (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts_ms       INTEGER NOT NULL,
+  kind        TEXT NOT NULL,
+  clip_id     TEXT,
+  source_app  TEXT,
+  detail      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity_log(ts_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_kind_ts ON activity_log(kind, ts_ms DESC);
 "#;

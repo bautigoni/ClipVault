@@ -22,6 +22,10 @@ target/
 src-tauri/Cargo.lock
 src-tauri/gen/schemas/
 
+# TypeScript incremental build cache
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
 # Build outputs
 *.exe
 *.msi

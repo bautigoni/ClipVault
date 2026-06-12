@@ -220,6 +220,13 @@ pub fn build_app() -> tauri::Builder<tauri::Wry> {
             commands::ring_add_to_set,
             commands::ring_remove_from_set,
             commands::test_paste,
+            commands::transform_clip,
+            commands::trigger_screenshot,
+            commands::ingest_dropped_files,
+            commands::ocr_clip,
+            commands::ocr_get,
+            commands::list_activity,
+            commands::clear_activity,
         ])
         .on_window_event(|window, event| {
             // Palette hides on blur instead of closing.

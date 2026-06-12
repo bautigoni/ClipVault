@@ -137,7 +137,81 @@ export const api = {
   // Diagnostic: triggers the auto-paste SendInput sequence without touching
   // the clipboard. See debug.log for what happened.
   testPaste: () => invoke<void>("test_paste"),
+
+  // Text transformations on a clip's content. Returns the transformed text +
+  // a count object for the `count` kind. Pure — does not touch the DB or
+  // the clipboard. The caller decides what to do with the result.
+  transformClip: (text: string, kind: TextTransformKind) =>
+    invoke<TransformResult>("transform_clip", { req: { text, kind } }),
+
+  // Open the Windows screen-snipping tool (Win+Shift+S). The captured image
+  // lands in the clipboard and the watcher records it as a normal image
+  // clip. Best paired with `clip://ocr-ready` to detect when text inside
+  // the screenshot is available to paste.
+  triggerScreenshot: () => invoke<void>("trigger_screenshot"),
+
+  // Drag-and-drop file ingest. Pass the absolute paths the user dropped on
+  // the main window. Returns the new clip id.
+  ingestDroppedFiles: (paths: string[]) =>
+    invoke<string>("ingest_dropped_files", { paths }),
+
+  // Run OCR (Windows built-in) on the image of `clipId` and write the
+  // recognized text into clip_ocr. Returns the recognized text or null if
+  // no language pack is installed / no text was found.
+  ocrClip: (clipId: string) => invoke<string | null>("ocr_clip", { clipId }),
+
+  // Read back the OCR'd text for a clip, if any. Cheap; reads a single row.
+  ocrGet: (clipId: string) => invoke<string | null>("ocr_get", { clipId }),
+
+  // Activity log
+  listActivity: (limit?: number) =>
+    invoke<ActivityEntry[]>("list_activity", { limit: limit ?? 200 }),
+  clearActivity: () => invoke<void>("clear_activity"),
 };
+
+export type TextTransformKind =
+  | "uppercase"
+  | "lowercase"
+  | "title_case"
+  | "sentence_case"
+  | "trim"
+  | "collapse_whitespace"
+  | "dedup_lines"
+  | "sort_lines_asc"
+  | "sort_lines_desc"
+  | "unique_lines"
+  | "reverse"
+  | "strip_empty_lines"
+  | "to_single_line"
+  | "url_encode"
+  | "url_decode"
+  | "base64_encode"
+  | "base64_decode"
+  | "count";
+
+export interface TransformCounts {
+  chars: number;
+  words: number;
+  lines: number;
+  bytes: number;
+}
+
+export interface TransformResult {
+  text: string;
+  label: string;
+  in_len: number;
+  out_len: number;
+  counts: TransformCounts | null;
+}
+
+export interface ActivityEntry {
+  id: number;
+  ts_ms: number;
+  kind: string;
+  clip_id: string | null;
+  source_app: string | null;
+  detail: string | null;
+}
 
 export interface RingSlotView {
   index: number;

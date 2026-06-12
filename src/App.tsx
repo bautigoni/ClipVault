@@ -8,6 +8,7 @@ import { CollectionsPage } from "./routes/CollectionsPage";
 import { SnippetsPage } from "./routes/SnippetsPage";
 import { SettingsPage } from "./routes/SettingsPage";
 import { ImagesPage } from "./routes/ImagesPage";
+import { ActivityPage } from "./routes/ActivityPage";
 import { useClipsInvalidation } from "./hooks/useClipsInvalidation";
 import { useThemeSync } from "./hooks/useThemeSync";
 
@@ -47,6 +48,7 @@ export default function App() {
         <Route path="/collections/:id" element={<CollectionsPage />} />
         <Route path="/snippets" element={<SnippetsPage />} />
         <Route path="/images" element={<ImagesPage />} />
+        <Route path="/activity" element={<ActivityPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/timeline" replace />} />
       </Routes>

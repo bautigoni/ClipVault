@@ -141,6 +141,13 @@ fn record_text(
         source_title,
         now,
     )?;
+    let _ = repo::log_activity(
+        &conn,
+        "clip_created",
+        Some(&id),
+        source_app,
+        Some(&format!("{} bytes, kind={}", text.len(), kind)),
+    );
     if let Some(clip) = repo::get_clip(&conn, &id)? {
         let _ = app.emit("clip://created", clip);
     }
@@ -194,7 +201,55 @@ fn record_image(
     if let Some(clip) = repo::get_clip(&conn, &id)? {
         let _ = app.emit("clip://created", clip);
     }
+
+    // Fire-and-forget OCR. The watcher thread is the user's clipboard thread;
+    // we don't want to block it on a 200-400ms OCR round-trip. Spawn a
+    // detached task that loads the file from disk, runs the engine, and
+    // writes the result into clip_ocr. The frontend polls `ocr_get` for
+    // the result and shows a "Text detected" badge when it arrives.
+    let app_ocr = app.clone();
+    let data_dir_ocr = state.data_dir.clone();
+    let id_ocr = id.clone();
+    std::thread::spawn(move || {
+        let bytes = match crate::images::storage::load_full(&data_dir_ocr, &path) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!(?e, "ocr: failed to reload image for ocr");
+                return;
+            }
+        };
+        match crate::ocr::recognize(&bytes) {
+            Ok(text) if !text.trim().is_empty() => {
+                let conn = match data_dir_ocr_for_conn(&app_ocr) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::warn!(?e, "ocr: db unavailable");
+                        return;
+                    }
+                };
+                let _ = repo::save_ocr(&conn, &id_ocr, &text, repo::now_ms());
+                let _ = app_ocr.emit("clip://ocr-ready", serde_json::json!({ "id": id_ocr }));
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::debug!(?e, "ocr: engine returned no text");
+            }
+        }
+    });
     Ok(())
+}
+
+// Helper to keep the closure above readable. Re-opens the DB pool from the
+// app state; the watcher holds its own connection, but that one is a checked
+// out &mut from the r2d2 pool which is fine to drop. The OCR thread just
+// re-checks-out for the write — the pool hands out a new connection.
+fn data_dir_ocr_for_conn(
+    app: &tauri::AppHandle,
+) -> anyhow::Result<crate::db::DbConn> {
+    use std::sync::Arc;
+    use tauri::Manager;
+    let state = app.state::<Arc<crate::state::AppState>>();
+    Ok(state.db.get()?)
 }
 
 fn record_files(

@@ -631,6 +631,89 @@ pub fn attach_files(conn: &DbConn, clip_id: &str, paths_json: &str) -> anyhow::R
     Ok(())
 }
 
+/// Persist OCR'd text for an image clip. Replaces any previous OCR result for
+/// the same clip; we treat OCR as a one-shot overwrite per re-run, not a log.
+pub fn save_ocr(
+    conn: &DbConn,
+    clip_id: &str,
+    text: &str,
+    now_ms: i64,
+) -> anyhow::Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO clip_ocr (clip_id, text, updated_at) VALUES (?, ?, ?)",
+        params![clip_id, text, now_ms],
+    )?;
+    Ok(())
+}
+
+/// Read back the OCR text for a clip, if any was ever written. Returns
+/// `Ok(None)` when the clip has no OCR row — distinct from the
+/// "OCR ran and produced empty text" case the caller has to handle.
+pub fn load_ocr(conn: &DbConn, clip_id: &str) -> anyhow::Result<Option<String>> {
+    let mut stmt = conn.prepare_cached("SELECT text FROM clip_ocr WHERE clip_id = ?")?;
+    let text: Option<String> = stmt
+        .query_row(params![clip_id], |r| r.get(0))
+        .ok()
+        .flatten();
+    Ok(text)
+}
+
+/// Append a single event to the activity log. We don't ever log content,
+/// only metadata (clip_id, source app, action kind, free-form detail) — see
+/// the schema comment for the safety story.
+pub fn log_activity(
+    conn: &DbConn,
+    kind: &str,
+    clip_id: Option<&str>,
+    source_app: Option<&str>,
+    detail: Option<&str>,
+) -> anyhow::Result<()> {
+    conn.execute(
+        "INSERT INTO activity_log (ts_ms, kind, clip_id, source_app, detail) VALUES (?, ?, ?, ?, ?)",
+        params![now_ms(), kind, clip_id, source_app, detail],
+    )?;
+    Ok(())
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct ActivityEntry {
+    pub id: i64,
+    pub ts_ms: i64,
+    pub kind: String,
+    pub clip_id: Option<String>,
+    pub source_app: Option<String>,
+    pub detail: Option<String>,
+}
+
+/// Read the most recent `limit` activity entries, newest first.
+pub fn list_activity(conn: &DbConn, limit: i64) -> anyhow::Result<Vec<ActivityEntry>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT id, ts_ms, kind, clip_id, source_app, detail
+         FROM activity_log ORDER BY id DESC LIMIT ?",
+    )?;
+    let rows = stmt
+        .query_map(params![limit], |r| {
+            Ok(ActivityEntry {
+                id: r.get(0)?,
+                ts_ms: r.get(1)?,
+                kind: r.get(2)?,
+                clip_id: r.get(3)?,
+                source_app: r.get(4)?,
+                detail: r.get(5)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// Hard-truncate the activity log. Used from settings ("Clear activity")
+/// and from a test fixture. We intentionally don't return a count — the
+/// caller doesn't need it.
+pub fn clear_activity(conn: &DbConn) -> anyhow::Result<()> {
+    conn.execute("DELETE FROM activity_log", [])?;
+    Ok(())
+}
+
 pub fn list_tags(conn: &DbConn) -> anyhow::Result<Vec<String>> {
     let mut stmt = conn.prepare_cached(
         "SELECT tag, COUNT(*) AS c FROM tags GROUP BY tag ORDER BY c DESC, tag LIMIT 200",

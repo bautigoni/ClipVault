@@ -16,17 +16,46 @@ pub use types::Settings;
 const STORE_FILE: &str = "settings.json";
 
 /// Resolve the data directory (where the SQLite DB, images, settings, etc. live).
-/// In portable builds (feature `portable`), the data lives next to the executable
-/// instead of in `%APPDATA%`.
+///
+/// Detection order (first match wins):
+/// 1. Explicit `CLIPVAULT_PORTABLE_DIR` env var → use it verbatim. Useful for
+///    running from a USB stick where the path changes between machines.
+/// 2. A `portable.flag` file (any contents) sitting next to the executable
+///    → use `<exe_dir>/data`. This is the Ditto convention and what users
+///    expect — drop a `portable.flag` next to the .exe and the app starts
+///    treating it as a portable install (settings, DB, thumbs all local).
+/// 3. A compile-time `portable` Cargo feature → same as 2 (kept for
+///    distributions that want a "portable-only" build, no flag file needed).
+/// 4. The standard per-user `%APPDATA%\com.clipvault.app`.
 pub fn data_dir(_app: &AppHandle) -> anyhow::Result<PathBuf> {
+    // 1) Explicit env var override.
+    if let Some(p) = std::env::var_os("CLIPVAULT_PORTABLE_DIR") {
+        let pb = std::path::PathBuf::from(p);
+        std::fs::create_dir_all(&pb).ok();
+        return Ok(pb);
+    }
+
+    // 2) portable.flag file or 3) compile-time feature, both → exe_dir/data.
+    let runtime_portable = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|p| p.join("portable.flag")))
+        .map(|f| f.exists())
+        .unwrap_or(false);
     #[cfg(feature = "portable")]
-    {
+    let is_portable = true;
+    #[cfg(not(feature = "portable"))]
+    let is_portable = false;
+    if runtime_portable || is_portable {
         if let Ok(exe) = std::env::current_exe() {
             if let Some(parent) = exe.parent() {
-                return Ok(parent.join("data"));
+                let data = parent.join("data");
+                std::fs::create_dir_all(&data).ok();
+                return Ok(data);
             }
         }
     }
+
+    // 4) Default per-user install.
     let dir = dirs::data_dir()
         .or_else(dirs::config_dir)
         .context("could not resolve user data directory")?

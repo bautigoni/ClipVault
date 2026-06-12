@@ -7,9 +7,12 @@ import {
   Image as ImageIcon,
   Settings as SettingsIcon,
   Search,
+  Camera,
+  Activity,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { api } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 
@@ -19,6 +22,7 @@ const navItems = [
   { to: "/collections", label: "Collections", icon: Folder },
   { to: "/snippets", label: "Snippets", icon: Code2 },
   { to: "/images", label: "Images", icon: ImageIcon },
+  { to: "/activity", label: "Activity", icon: Activity },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -29,6 +33,38 @@ export function AppShell({ children }: { children: ReactNode }) {
     queryFn: api.listCollections,
   });
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [fileDropFlash, setFileDropFlash] = useState<string | null>(null);
+
+  // OS-level drag-and-drop: when the user drops a file from Explorer onto
+  // the main window (NOT onto a collection item, which is the in-app drag
+  // above), we ingest it as a new `files` clip. Tauri's webview emits
+  // `tauri://drag-drop` with a list of absolute paths.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    getCurrentWebview()
+      .onDragDropEvent(async (event) => {
+        if (event.payload.type !== "drop") return;
+        const paths = (event.payload as { type: "drop"; paths: string[] }).paths;
+        if (!paths || paths.length === 0) return;
+        try {
+          const id = await api.ingestDroppedFiles(paths);
+          qc.invalidateQueries({ queryKey: ["clips"] });
+          qc.invalidateQueries({ queryKey: ["collections"] });
+          qc.invalidateQueries({ queryKey: ["activity"] });
+          setFileDropFlash(`Imported ${paths.length} file${paths.length === 1 ? "" : "s"} as clip ${id.slice(0, 8)}`);
+          window.setTimeout(() => setFileDropFlash(null), 2500);
+        } catch (e) {
+          console.error("ingestDroppedFiles failed", e);
+          setFileDropFlash(`Failed: ${(e as Error).message ?? e}`);
+          window.setTimeout(() => setFileDropFlash(null), 3500);
+        }
+      })
+      .then((fn) => (unlisten = fn))
+      .catch((e) => console.error("onDragDropEvent listen failed", e));
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [qc]);
 
   const handleDrop = async (e: React.DragEvent, collectionId: string) => {
     e.preventDefault();
@@ -64,6 +100,15 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Search className="h-4 w-4" />
             <span>Quick search</span>
             <span className="ml-auto kbd">Ctrl+Shift+V</span>
+          </button>
+          <button
+            onClick={() => api.triggerScreenshot()}
+            className="mt-1 flex w-full items-center gap-2 rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg-muted transition-colors hover:bg-bg-overlay hover:text-fg"
+            title="Open the Windows snipping tool. The captured region lands in your ClipVault history as an image clip — text inside it is auto-extracted via OCR."
+          >
+            <Camera className="h-4 w-4" />
+            <span>Screenshot → clip</span>
+            <span className="ml-auto kbd">⊞⇧S</span>
           </button>
         </div>
         <nav className="mt-4 flex flex-col gap-0.5 px-2">
@@ -170,6 +215,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </aside>
       <main className="flex-1 overflow-hidden">{children}</main>
+      {fileDropFlash && (
+        <div className="pointer-events-none fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-md border border-border bg-bg-elevated px-4 py-2 text-sm text-fg shadow-lg">
+          {fileDropFlash}
+        </div>
+      )}
     </div>
   );
 }
