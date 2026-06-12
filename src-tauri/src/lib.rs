@@ -227,6 +227,14 @@ pub fn build_app() -> tauri::Builder<tauri::Wry> {
             commands::ocr_get,
             commands::list_activity,
             commands::clear_activity,
+            // Per-device multi-user
+            commands::users_list,
+            commands::users_create,
+            commands::users_rename,
+            commands::users_set_default,
+            commands::users_delete,
+            commands::users_get_active,
+            commands::users_set_active,
         ])
         .on_window_event(|window, event| {
             // Palette hides on blur instead of closing.

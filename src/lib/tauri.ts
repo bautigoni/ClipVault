@@ -167,6 +167,17 @@ export const api = {
   listActivity: (limit?: number) =>
     invoke<ActivityEntry[]>("list_activity", { limit: limit ?? 200 }),
   clearActivity: () => invoke<void>("clear_activity"),
+
+  // Per-device multi-user
+  usersList: () => invoke<User[]>("users_list"),
+  usersCreate: (displayName: string, email?: string | null) =>
+    invoke<User>("users_create", { displayName, email: email ?? null }),
+  usersRename: (id: string, displayName: string) =>
+    invoke<void>("users_rename", { id, displayName }),
+  usersSetDefault: (id: string) => invoke<User>("users_set_default", { id }),
+  usersDelete: (id: string) => invoke<void>("users_delete", { id }),
+  usersGetActive: () => invoke<User>("users_get_active"),
+  usersSetActive: (id: string) => invoke<void>("users_set_active", { id }),
 };
 
 export type TextTransformKind =
@@ -211,6 +222,15 @@ export interface ActivityEntry {
   clip_id: string | null;
   source_app: string | null;
   detail: string | null;
+}
+
+export interface User {
+  id: string;
+  display_name: string;
+  email: string | null;
+  is_default: boolean;
+  created_at: number;
+  updated_at: number;
 }
 
 export interface RingSlotView {

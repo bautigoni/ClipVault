@@ -54,6 +54,12 @@ pub struct Settings {
     /// pressing ↑/↓. 0 = snap to top/bottom of the list.
     #[serde(default = "default_palette_jump_size")]
     pub palette_jump_size: usize,
+    /// The id of the user whose clips/collections/etc. are shown by default.
+    /// The setting is an opaque id pointing at the `users` table; the
+    /// resolver falls back to the default user if the id is missing or
+    /// stale, so an out-of-date value here can never break the app.
+    #[serde(default)]
+    pub active_user_id: Option<String>,
 }
 
 fn default_ring_hotkey_reverse() -> String { "CommandOrControl+Shift+V".into() }
@@ -97,6 +103,10 @@ impl Default for Settings {
             ring_include_images: default_ring_include_images(),
             merge_separator: default_merge_separator(),
             palette_jump_size: default_palette_jump_size(),
+            // The repo resolver fills this in on first use. We keep it None
+            // in the default struct so a brand-new install has no active
+            // user id at all until the watcher / list commands run.
+            active_user_id: None,
         }
     }
 }

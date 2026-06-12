@@ -1218,6 +1218,8 @@ pub async fn ingest_dropped_files(
         Some("drop"),
         None,
         now,
+        &repo::resolve_active_user(&conn, settings::load_settings(&app).active_user_id.as_deref())
+            .map_err(err)?,
     )
     .map_err(err)?;
     repo::attach_files(&conn, &id, &json).map_err(err)?;
@@ -1293,4 +1295,106 @@ pub async fn list_activity(
 pub async fn clear_activity(state: State<'_, AppStateHandle>) -> Result<(), String> {
     let conn = state.db.get().map_err(err)?;
     repo::clear_activity(&conn).map_err(err)
+}
+
+// ---------------------------------------------------------------------------
+// Per-device multi-user (Phase 6 / Fase 1)
+// ---------------------------------------------------------------------------
+//
+// The active user is persisted in `Settings.active_user_id`. The watcher
+// and the list queries read that setting through `load_settings` and pass
+// the resolved id down to the repo. We resolve lazily on every command
+// (not once at boot) so a UI switch takes effect on the next call without
+// needing to restart the app or rebind any handle.
+
+#[tauri::command]
+pub async fn users_list(
+    app: AppHandle,
+    state: State<'_, AppStateHandle>,
+) -> Result<Vec<repo::User>, String> {
+    let conn = state.db.get().map_err(err)?;
+    let users = repo::list_users(&conn).map_err(err)?;
+    // Touch settings so a fresh install that has never queried the user
+    // table still gets a deterministic active id.
+    let _ = settings::load_settings(&app);
+    Ok(users)
+}
+
+#[tauri::command]
+pub async fn users_create(
+    state: State<'_, AppStateHandle>,
+    display_name: String,
+    email: Option<String>,
+) -> Result<repo::User, String> {
+    let conn = state.db.get().map_err(err)?;
+    repo::create_user(&conn, &display_name, email.as_deref()).map_err(err)
+}
+
+#[tauri::command]
+pub async fn users_rename(
+    state: State<'_, AppStateHandle>,
+    id: String,
+    display_name: String,
+) -> Result<(), String> {
+    let conn = state.db.get().map_err(err)?;
+    repo::rename_user(&conn, &id, &display_name).map_err(err)
+}
+
+#[tauri::command]
+pub async fn users_set_default(
+    state: State<'_, AppStateHandle>,
+    id: String,
+) -> Result<repo::User, String> {
+    let conn = state.db.get().map_err(err)?;
+    repo::set_default_user(&conn, &id).map_err(err)
+}
+
+#[tauri::command]
+pub async fn users_delete(state: State<'_, AppStateHandle>, id: String) -> Result<(), String> {
+    let conn = state.db.get().map_err(err)?;
+    repo::delete_user(&conn, &id).map_err(err)
+}
+
+#[tauri::command]
+pub async fn users_get_active(
+    app: AppHandle,
+    state: State<'_, AppStateHandle>,
+) -> Result<repo::User, String> {
+    let settings = settings::load_settings(&app);
+    let conn = state.db.get().map_err(err)?;
+    let id = repo::resolve_active_user(&conn, settings.active_user_id.as_deref())
+        .map_err(err)?;
+    // The resolver always returns Some unless the DB is genuinely corrupt.
+    repo::get_user(&conn, &id)
+        .map_err(err)?
+        .ok_or_else(|| "active user not found after resolution".to_string())
+}
+
+#[tauri::command]
+pub async fn users_set_active(
+    app: AppHandle,
+    id: String,
+) -> Result<(), String> {
+    // Validate that the id exists before persisting it, so the UI cannot
+    // accidentally write a dangling reference.
+    let conn = app
+        .state::<AppStateHandle>()
+        .db
+        .get()
+        .map_err(err)?;
+    if repo::get_user(&conn, &id).map_err(err)?.is_none() {
+        return Err(format!("user {id} does not exist"));
+    }
+    drop(conn);
+    // We don't reuse `commands::update_settings` here because it is itself
+    // a Tauri command (cannot be called from inside another command) and
+    // because we want the active-user write to NOT trigger the
+    // `apply_settings_side_effects` fanout — switching profiles is cheap
+    // and only affects what gets recorded, not any registered resources.
+    let current = settings::load_settings(&app);
+    let next = settings::Settings {
+        active_user_id: Some(id),
+        ..current
+    };
+    settings::save_settings(&app, &next).map_err(err)
 }

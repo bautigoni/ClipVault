@@ -9,12 +9,14 @@ import {
   Search,
   Camera,
   Activity,
+  MessageSquare,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { api } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
+import { UserSwitcher } from "./UserSwitcher";
 
 const navItems = [
   { to: "/timeline", label: "Timeline", icon: Clock },
@@ -23,6 +25,7 @@ const navItems = [
   { to: "/snippets", label: "Snippets", icon: Code2 },
   { to: "/images", label: "Images", icon: ImageIcon },
   { to: "/activity", label: "Activity", icon: Activity },
+  { to: "/chat", label: "Chat", icon: MessageSquare },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -83,14 +86,17 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-full">
       <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-bg-elevated">
-        <div className="flex items-center gap-2 px-4 py-4">
-          <div className="grid h-8 w-8 place-items-center rounded-md bg-accent text-accent-fg font-bold">
-            CV
+        <div className="flex items-center justify-between gap-2 px-3 py-3">
+          <div className="flex items-center gap-2">
+            <div className="grid h-7 w-7 place-items-center rounded-md bg-accent text-accent-fg font-bold text-xs">
+              CV
+            </div>
+            <div>
+              <h1 className="text-sm font-semibold leading-none">ClipVault</h1>
+              <p className="text-[10px] text-fg-muted">local clipboard</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-sm font-semibold leading-none">ClipVault</h1>
-            <p className="text-[11px] text-fg-muted">local clipboard</p>
-          </div>
+          <UserSwitcher />
         </div>
         <div className="px-2">
           <button

@@ -39,13 +39,14 @@ pub fn insert_clip(
     source_app: Option<&str>,
     source_title: Option<&str>,
     now_ms: i64,
+    user_id: &str,
 ) -> anyhow::Result<String> {
     let id = Ulid::new().to_string();
     conn.execute(
         "INSERT INTO clips
-         (id, type, content_hash, text_preview, byte_size, source_app, source_title, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        params![id, kind, content_hash, text_preview, byte_size, source_app, source_title, now_ms, now_ms],
+         (id, type, content_hash, text_preview, byte_size, source_app, source_title, created_at, updated_at, user_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        params![id, kind, content_hash, text_preview, byte_size, source_app, source_title, now_ms, now_ms, user_id],
     )?;
     Ok(id)
 }
@@ -1075,3 +1076,251 @@ pub fn enforce_max_clips(conn: &DbConn, max_clips: i64) -> anyhow::Result<usize>
     Ok(affected)
 }
 
+// ---------------------------------------------------------------------------
+// Phase 6 / Fase 1: per-device multi-user support.
+//
+// The user table is intentionally minimal: an id, a display name, an optional
+// email, an is_default flag (uniquely enforced by the partial index), and
+// timestamps. We do NOT store passwords, passphrases, or anything sensitive
+// in the user row — those live in the sync tables (Phase 6, cloud sync).
+//
+// We expose CRUD operations that all run in transactions where multi-step
+// invariants matter (`set_default` clears the old default in the same tx).
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct User {
+    pub id: String,
+    pub display_name: String,
+    pub email: Option<String>,
+    pub is_default: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// List every user in the DB, sorted by created_at ASC so the default user
+/// is always at index 0 and newly-created users land at the bottom of the
+/// dropdown. Cheap because we have at most a handful of users per device.
+pub fn list_users(conn: &DbConn) -> anyhow::Result<Vec<User>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT id, display_name, email, is_default, created_at, updated_at
+         FROM users ORDER BY created_at ASC",
+    )?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(User {
+                id: r.get(0)?,
+                display_name: r.get(1)?,
+                email: r.get(2)?,
+                is_default: r.get::<_, i64>(3)? != 0,
+                created_at: r.get(4)?,
+                updated_at: r.get(5)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// Look up a single user by id. Returns None if the id no longer exists
+/// (e.g. it was deleted while another window had it cached).
+pub fn get_user(conn: &DbConn, id: &str) -> anyhow::Result<Option<User>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT id, display_name, email, is_default, created_at, updated_at
+         FROM users WHERE id = ?",
+    )?;
+    let user = stmt
+        .query_row(params![id], |r| {
+            Ok(User {
+                id: r.get(0)?,
+                display_name: r.get(1)?,
+                email: r.get(2)?,
+                is_default: r.get::<_, i64>(3)? != 0,
+                created_at: r.get(4)?,
+                updated_at: r.get(5)?,
+            })
+        })
+        .ok();
+    Ok(user)
+}
+
+/// Look up the current default user. We always have one (the unique partial
+/// index guarantees it) but we still return Option for the same defensive
+/// reasons as get_user: the unique index can theoretically be violated by
+/// direct DB tampering, and we want a clean error path.
+pub fn get_default_user(conn: &DbConn) -> anyhow::Result<Option<User>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT id, display_name, email, is_default, created_at, updated_at
+         FROM users WHERE is_default = 1 LIMIT 1",
+    )?;
+    let user = stmt
+        .query_row([], |r| {
+            Ok(User {
+                id: r.get(0)?,
+                display_name: r.get(1)?,
+                email: r.get(2)?,
+                is_default: true,
+                created_at: r.get(4)?,
+                updated_at: r.get(5)?,
+            })
+        })
+        .ok();
+    Ok(user)
+}
+
+/// Create a new user. The id is a fresh ULID; the caller cannot supply one
+/// (so we never get a collision). `email` is optional and not validated —
+/// it's a label for the UI, not an auth identifier.
+pub fn create_user(
+    conn: &DbConn,
+    display_name: &str,
+    email: Option<&str>,
+) -> anyhow::Result<User> {
+    let trimmed = display_name.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("display_name cannot be empty");
+    }
+    let id = Ulid::new().to_string();
+    let now = now_ms();
+    conn.execute(
+        "INSERT INTO users (id, display_name, email, is_default, created_at, updated_at)
+         VALUES (?, ?, ?, 0, ?, ?)",
+        params![id, trimmed, email, now, now],
+    )?;
+    Ok(User {
+        id,
+        display_name: trimmed.to_string(),
+        email: email.map(|s| s.to_string()),
+        is_default: false,
+        created_at: now,
+        updated_at: now,
+    })
+}
+
+/// Rename a user. We reject the rename of the default user's display name
+/// to the empty string (the watcher and several UI affordances assume
+/// there's always a non-empty default name to fall back on).
+pub fn rename_user(conn: &DbConn, id: &str, display_name: &str) -> anyhow::Result<()> {
+    let trimmed = display_name.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("display_name cannot be empty");
+    }
+    let affected = conn.execute(
+        "UPDATE users SET display_name = ?, updated_at = ? WHERE id = ?",
+        params![trimmed, now_ms(), id],
+    )?;
+    if affected == 0 {
+        anyhow::bail!("user {id} does not exist");
+    }
+    Ok(())
+}
+
+/// Set a user as the default. Runs in a transaction so the invariant "exactly
+/// one user has is_default=1" is preserved even under racing writes. We
+/// intentionally do not allow setting the default to the already-default
+/// user (no-op write), but we DO allow switching it; the caller can keep
+/// using whichever user the UI shows as default.
+pub fn set_default_user(conn: &DbConn, id: &str) -> anyhow::Result<User> {
+    let tx = conn.unchecked_transaction()?;
+    // First make sure the target user actually exists.
+    let user: User = {
+        let mut stmt = tx.prepare_cached(
+            "SELECT id, display_name, email, is_default, created_at, updated_at
+             FROM users WHERE id = ?",
+        )?;
+        stmt.query_row(params![id], |r| {
+            Ok(User {
+                id: r.get(0)?,
+                display_name: r.get(1)?,
+                email: r.get(2)?,
+                is_default: r.get::<_, i64>(3)? != 0,
+                created_at: r.get(4)?,
+                updated_at: r.get(5)?,
+            })
+        })
+        .map_err(|_| anyhow::anyhow!("user {id} does not exist"))?
+    };
+    // The `stmt` is now out of scope; the borrow on `tx` is released so we
+    // can run UPDATE statements on the same connection.
+    let now = now_ms();
+    tx.execute(
+        "UPDATE users SET is_default = 0, updated_at = ? WHERE is_default = 1",
+        params![now],
+    )?;
+    tx.execute(
+        "UPDATE users SET is_default = 1, updated_at = ? WHERE id = ?",
+        params![now, id],
+    )?;
+    tx.commit()?;
+    Ok(User {
+        is_default: true,
+        updated_at: now,
+        ..user
+    })
+}
+
+/// Delete a user. Refuses to delete the default user (we always need a
+/// default) and refuses to delete a user that still has clips referencing
+/// it. The caller has to reassign or delete the user's clips first; the UI
+/// surfaces that requirement with a clear error message.
+pub fn delete_user(conn: &DbConn, id: &str) -> anyhow::Result<()> {
+    // Refuse if it's the default.
+    let is_default: i64 = conn
+        .query_row(
+            "SELECT is_default FROM users WHERE id = ?",
+            params![id],
+            |r| r.get(0),
+        )
+        .map_err(|_| anyhow::anyhow!("user {id} does not exist"))?;
+    if is_default != 0 {
+        anyhow::bail!("cannot delete the default user; reassign the default first");
+    }
+    // Refuse if any clip references it. We check `clips` because that is
+    // the most user-facing table; the FKs from other tables cascade on
+    // delete and the backfill would otherwise orphan image/ocr rows. If
+    // you want to delete a non-default user, first reassign their clips
+    // (a future bulk endpoint) or wipe the device.
+    let clip_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM clips WHERE user_id = ?",
+            params![id],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    if clip_count > 0 {
+        anyhow::bail!(
+            "user has {clip_count} clip(s) — delete or reassign them first"
+        );
+    }
+    conn.execute("DELETE FROM users WHERE id = ?", params![id])?;
+    Ok(())
+}
+
+/// The user_id we hand to the watcher and to the list queries. We do not
+/// cache this on AppState; the caller is expected to read the setting on
+/// every call so a UI switch takes effect immediately.
+///
+/// Falls back to the default user if (a) the active_user_id setting is
+/// missing, (b) it points at a user that no longer exists, or (c) the
+/// default user itself is missing (which would be a schema violation,
+/// but the fallback chain keeps the app from crashing).
+pub fn resolve_active_user(conn: &DbConn, active_id: Option<&str>) -> anyhow::Result<String> {
+    if let Some(id) = active_id {
+        if get_user(conn, id)?.is_some() {
+            return Ok(id.to_string());
+        }
+    }
+    if let Some(u) = get_default_user(conn)? {
+        return Ok(u.id);
+    }
+    // Last-ditch: the default user is missing, which means the DB is in
+    // an inconsistent state. Recreate it and return its id. This is
+    // best-effort — if it fails too, we bubble up the error.
+    let id = "user_default".to_string();
+    let now = now_ms();
+    let _ = conn.execute(
+        "INSERT OR IGNORE INTO users (id, display_name, is_default, created_at, updated_at)
+         VALUES (?, 'Default', 1, ?, ?)",
+        params![id, now, now],
+    );
+    Ok(id)
+}

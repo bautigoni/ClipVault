@@ -152,6 +152,15 @@ pub fn merge_settings(current: &Settings, patch: &SettingsPatch) -> Settings {
     if let Some(v) = patch.ring_include_images {
         next.ring_include_images = v;
     }
+    if let Some(v) = &patch.merge_separator {
+        next.merge_separator = v.clone();
+    }
+    if let Some(v) = patch.palette_jump_size {
+        next.palette_jump_size = v;
+    }
+    if let Some(v) = &patch.active_user_id {
+        next.active_user_id = v.clone();
+    }
     next
 }
 
@@ -187,6 +196,12 @@ pub struct SettingsPatch {
     pub ring_include_sensitive: Option<bool>,
     pub ring_include_files: Option<bool>,
     pub ring_include_images: Option<bool>,
+    pub merge_separator: Option<String>,
+    pub palette_jump_size: Option<usize>,
+    /// Outer-Option pattern: `Some(Some(id))` sets a value, `Some(None)`
+    /// clears it, `None` leaves it unchanged. Matches the convention used
+    /// elsewhere in this patch (and `update_clip_meta`).
+    pub active_user_id: Option<Option<String>>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

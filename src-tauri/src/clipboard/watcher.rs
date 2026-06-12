@@ -7,6 +7,7 @@ use tracing::{debug, info, warn};
 use crate::clipboard::source;
 use crate::clipboard::{DEDUPE_WINDOW_MS, POLL_INTERVAL};
 use crate::db::repo;
+use crate::settings;
 use crate::state::AppState;
 
 /// Spawn the watcher thread. Idempotent: if one is already running, this is a no-op.
@@ -140,6 +141,7 @@ fn record_text(
         source_app,
         source_title,
         now,
+        &active_user_id(&app, &conn)?,
     )?;
     let _ = repo::log_activity(
         &conn,
@@ -184,6 +186,7 @@ fn record_image(
         source_app,
         source_title,
         now,
+        &active_user_id(app, &conn)?,
     )?;
     let images_dir = state.data_dir.join("images");
     std::fs::create_dir_all(&images_dir)?;
@@ -288,6 +291,7 @@ fn record_files(
         source_app,
         source_title,
         now,
+        &active_user_id(app, &conn)?,
     )?;
     repo::attach_files(&conn, &id, &json)?;
     if let Some(clip) = repo::get_clip(&conn, &id)? {
@@ -300,4 +304,15 @@ fn record_files(
 /// watcher doesn't immediately re-record the just-pasted content.
 pub fn arm_suppress(state: &AppState, hash: String) {
     state.suppress.arm(hash, crate::clipboard::SUPPRESS_TTL_MS);
+}
+
+/// Resolve the user_id every new clip should be tagged with. Reads the
+/// `active_user_id` setting and falls back to the default user if the
+/// setting is missing, stale, or the DB is in an inconsistent state. We
+/// never return an error that the watcher cannot survive — we log and
+/// fall back to the default user so a UI bug cannot silently drop clips.
+fn active_user_id(app: &AppHandle, conn: &crate::db::DbConn) -> anyhow::Result<String> {
+    let settings = settings::load_settings(app);
+    let id = repo::resolve_active_user(conn, settings.active_user_id.as_deref())?;
+    Ok(id)
 }

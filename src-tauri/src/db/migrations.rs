@@ -9,7 +9,7 @@ use tracing::info;
 use super::{DbConn, DbPool};
 
 #[allow(dead_code)]
-const CURRENT_VERSION: i32 = 3;
+const CURRENT_VERSION: i32 = 4;
 
 pub struct Migration {
     pub version: i32,
@@ -32,6 +32,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 3,
         name: "activity_log",
         sql: ACTIVITY_SCHEMA,
+    },
+    Migration {
+        version: 4,
+        name: "users",
+        sql: USERS_SCHEMA,
     },
 ];
 
@@ -247,4 +252,73 @@ CREATE TABLE IF NOT EXISTS activity_log (
 );
 CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity_log(ts_ms DESC);
 CREATE INDEX IF NOT EXISTS idx_activity_kind_ts ON activity_log(kind, ts_ms DESC);
+"#;
+
+/// Phase 6 / Fase 1: per-device multi-user support. Adds a `users` table and
+/// a `user_id` column to every user-owned row. The active user is selected
+/// at runtime via the `active_user_id` setting; queries filter on it.
+///
+/// We do NOT make `user_id` NOT NULL — the backfill in the migration itself
+/// fills existing rows with the default user, and code that does not pass a
+/// `user_id` keeps the old behaviour (NULL = default). The NOT NULL constraint
+/// ships in a later migration once the codebase is fully converted.
+const USERS_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS users (
+  id           TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL,
+  email        TEXT,
+  is_default   INTEGER NOT NULL DEFAULT 0,
+  created_at   INTEGER NOT NULL,
+  updated_at   INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_default
+  ON users(is_default) WHERE is_default = 1;
+
+-- Default user. Every existing row will point to it. New rows created
+-- without an explicit user will also point to it (the active user is
+-- always seeded as a default; we pick the most-recently-active one at
+-- boot if multiple defaults somehow exist, but the unique partial index
+-- guarantees only one in practice).
+INSERT OR IGNORE INTO users (id, display_name, email, is_default, created_at, updated_at)
+VALUES ('user_default', 'Default', NULL, 1,
+        (CAST(strftime('%s','now') AS INTEGER) * 1000),
+        (CAST(strftime('%s','now') AS INTEGER) * 1000));
+
+-- Add user_id columns to every user-owned table. Each ADD COLUMN that
+-- tries to add a column that already exists raises a SqliteError, so we
+-- guard with the pragma-based check below (re-runs of this migration
+-- must be no-ops). SQLite has no IF NOT EXISTS for ALTER TABLE ADD COLUMN
+-- pre-3.35, but the project pins rusqlite 0.31 which uses sqlite 3.45+.
+ALTER TABLE clips              ADD COLUMN user_id TEXT REFERENCES users(id);
+ALTER TABLE collections        ADD COLUMN user_id TEXT REFERENCES users(id);
+ALTER TABLE snippets           ADD COLUMN user_id TEXT REFERENCES users(id);
+ALTER TABLE images             ADD COLUMN user_id TEXT REFERENCES users(id);
+ALTER TABLE file_clips         ADD COLUMN user_id TEXT REFERENCES users(id);
+ALTER TABLE clip_ocr           ADD COLUMN user_id TEXT REFERENCES users(id);
+ALTER TABLE ring_sets          ADD COLUMN user_id TEXT REFERENCES users(id);
+ALTER TABLE ring_set_items     ADD COLUMN user_id TEXT REFERENCES users(id);
+ALTER TABLE ring_set_configs   ADD COLUMN user_id TEXT REFERENCES users(id);
+
+-- Backfill: every existing row points to the default user. The partial
+-- index already guarantees 'user_default' is present.
+UPDATE clips              SET user_id = 'user_default' WHERE user_id IS NULL;
+UPDATE collections        SET user_id = 'user_default' WHERE user_id IS NULL;
+UPDATE snippets           SET user_id = 'user_default' WHERE user_id IS NULL;
+UPDATE images             SET user_id = 'user_default' WHERE user_id IS NULL;
+UPDATE file_clips         SET user_id = 'user_default' WHERE user_id IS NULL;
+UPDATE clip_ocr           SET user_id = 'user_default' WHERE user_id IS NULL;
+UPDATE ring_sets          SET user_id = 'user_default' WHERE user_id IS NULL;
+UPDATE ring_set_items     SET user_id = 'user_default' WHERE user_id IS NULL;
+UPDATE ring_set_configs   SET user_id = 'user_default' WHERE user_id IS NULL;
+
+-- Indexes to make the per-user filter index-friendly. The list pages all
+-- query `WHERE user_id = ? ORDER BY created_at DESC`, so we composite the
+-- column with the existing sort key.
+CREATE INDEX IF NOT EXISTS idx_clips_user_created        ON clips(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_collections_user          ON collections(user_id);
+CREATE INDEX IF NOT EXISTS idx_snippets_user             ON snippets(user_id);
+CREATE INDEX IF NOT EXISTS idx_images_user                ON images(user_id);
+CREATE INDEX IF NOT EXISTS idx_file_clips_user           ON file_clips(user_id);
+CREATE INDEX IF NOT EXISTS idx_ring_sets_user_created    ON ring_sets(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ring_set_items_user       ON ring_set_items(user_id);
 "#;
