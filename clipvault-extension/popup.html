@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ClipVault Bridge</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <h1>ClipVault Bridge</h1>
+      <label>
+        <input type="checkbox" id="enabled" />
+        Enable sending selections
+      </label>
+      <label>
+        Port
+        <input type="number" id="port" min="1" max="65535" />
+      </label>
+      <p class="hint">
+        Make sure ClipVault is running and that the local HTTP receiver is enabled
+        in ClipVault's settings.
+      </p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

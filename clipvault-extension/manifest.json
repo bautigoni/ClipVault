@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "ClipVault Bridge",
+  "version": "0.1.0",
+  "description": "Send selected text and page metadata to your local ClipVault instance.",
+  "permissions": ["contextMenus", "activeTab", "scripting", "storage"],
+  "host_permissions": ["http://127.0.0.1:*/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Send to ClipVault"
+  },
+  "options_page": "options.html",
+  "icons": {
+    "16": "icon-16.png",
+    "48": "icon-48.png",
+    "128": "icon-128.png"
+  }
+}

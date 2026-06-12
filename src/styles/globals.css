@@ -1,0 +1,107 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg: 17 17 19;            /* near-black for dark */
+    --bg-elevated: 24 24 27;
+    --bg-overlay: 39 39 42;
+    --fg: 244 244 245;
+    --fg-muted: 161 161 170;
+    --fg-subtle: 113 113 122;
+    --border: 39 39 42;
+    --accent: 99 102 241;
+    --accent-fg: 255 255 255;
+    --danger: 239 68 68;
+    --success: 34 197 94;
+    --warning: 234 179 8;
+  }
+
+  html.light, html:not(.dark) {
+    --bg: 250 250 250;
+    --bg-elevated: 255 255 255;
+    --bg-overlay: 244 244 245;
+    --fg: 24 24 27;
+    --fg-muted: 82 82 91;
+    --fg-subtle: 113 113 122;
+    --border: 228 228 231;
+    --accent: 79 70 229;
+    --accent-fg: 255 255 255;
+  }
+
+  html.graphite {
+    --bg: 12 12 14;
+    --bg-elevated: 19 19 22;
+    --bg-overlay: 32 32 36;
+    --fg: 220 220 224;
+    --fg-muted: 140 140 148;
+    --fg-subtle: 100 100 110;
+    --border: 32 32 36;
+    --accent: 56 189 248;
+  }
+
+  html, body, #root {
+    @apply h-full;
+  }
+
+  body {
+    @apply bg-bg text-fg antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  ::-webkit-scrollbar {
+    @apply h-2 w-2;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-bg-overlay;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-fg-subtle;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@layer components {
+  .clip-row {
+    @apply flex items-center gap-3 rounded-md px-3 py-2 transition-colors;
+  }
+  .clip-row[data-active="true"] {
+    @apply bg-accent/15 ring-1 ring-accent/40;
+  }
+  .clip-row[data-checked="true"] {
+    @apply bg-accent/10;
+  }
+  .clip-row:not([data-active="true"]):hover {
+    @apply bg-bg-overlay;
+  }
+  .btn {
+    @apply inline-flex items-center gap-2 rounded-md border border-border bg-bg-elevated px-3 py-1.5 text-sm font-medium text-fg transition-colors hover:bg-bg-overlay focus:outline-none focus:ring-2 focus:ring-accent/50;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-fg-muted transition-colors hover:bg-bg-overlay hover:text-fg;
+  }
+  .btn-primary {
+    @apply inline-flex items-center gap-2 rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-accent-fg transition-colors hover:bg-accent/90 focus:outline-none focus:ring-2 focus:ring-accent/50;
+  }
+  .input {
+    @apply w-full rounded-md border border-border bg-bg-elevated px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-accent/60 focus:outline-none focus:ring-1 focus:ring-accent/40;
+  }
+  .kbd {
+    @apply inline-flex items-center rounded border border-border bg-bg-elevated px-1.5 py-0.5 font-mono text-[10px] uppercase text-fg-muted;
+  }
+  .tag-chip {
+    @apply inline-flex items-center gap-1 rounded-full bg-bg-overlay px-2 py-0.5 text-[11px] text-fg-muted;
+  }
+  .sidebar-item {
+    @apply flex items-center justify-between rounded-md px-2 py-1.5 text-sm text-fg-muted hover:bg-bg-overlay hover:text-fg;
+  }
+  .sidebar-item[data-active="true"] {
+    @apply bg-accent/15 text-fg;
+  }
+  .empty-state {
+    @apply flex flex-col items-center justify-center gap-2 py-16 text-center text-fg-subtle;
+  }
+}

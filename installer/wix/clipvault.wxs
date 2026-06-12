@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ClipVault WiX template. Built by Tauri when bundle.targets includes "msi".
+  Customization points (data dir, autostart toggle) are managed by the Tauri
+  config; this template only sets the metadata.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product
+    Id="*"
+    Name="ClipVault"
+    Version="0.1.0"
+    Manufacturer="ClipVault"
+    UpgradeCode="C11A2A2C-3B2E-4A22-9C0E-1F2E7C8B9C0D"
+    Language="1033"
+    Codepage="1252"
+    SummaryCodepage="1252">
+    <Package
+      Id="*"
+      Keywords="clipboard manager"
+      Description="ClipVault - Privacy-first local clipboard manager"
+      Manufacturer="ClipVault"
+      InstallerVersion="500"
+      Languages="1033"
+      Compressed="yes" />
+    <Media Id="1" Cabinet="clipvault.cab" EmbedCab="yes" />
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLDIR" Name="ClipVault">
+          <Component Id="MainExecutable" Guid="*" Win64="yes">
+            <File Source="$(var.SourceDir)\clipvault.exe" />
+          </Component>
+        </Directory>
+      </Directory>
+    </Directory>
+    <Feature Id="ProductFeature" Title="ClipVault" Level="1">
+      <ComponentRef Id="MainExecutable" />
+    </Feature>
+    <Property Id="ARPCOMMENTS" Value="Privacy-first local clipboard manager." />
+    <Property Id="ARPCONTACT" Value="https://clipvault.app" />
+    <Property Id="ARPHELPLINK" Value="https://clipvault.app/help" />
+    <Property Id="ARPURLINFOABOUT" Value="https://clipvault.app" />
+    <Property Id="ARPPRODUCTICON" Value="ProductIcon.ico" />
+    <UIRef Id="WixUI_Minimal" />
+  </Product>
+</Wix>

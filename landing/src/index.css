@@ -1,0 +1,111 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    background: rgb(17 17 19);
+    color: rgb(244 244 245);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    overflow-x: hidden;
+  }
+  ::selection {
+    background: rgb(99 102 241 / 0.4);
+    color: rgb(255 255 255);
+  }
+}
+
+@layer components {
+  .container-page {
+    @apply mx-auto w-full max-w-6xl px-6 sm:px-8;
+  }
+
+  .gradient-text {
+    background: linear-gradient(135deg, #818cf8 0%, #c084fc 50%, #f472b6 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .gradient-text-indigo {
+    background: linear-gradient(135deg, #6366f1 0%, #818cf8 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .btn-primary {
+    @apply relative inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-accent/30 transition-all duration-200 hover:scale-[1.03] hover:bg-accent-light hover:shadow-accent/50 active:scale-[0.98];
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-bg-elevated/60 px-5 py-2.5 text-sm font-semibold text-fg backdrop-blur transition-all duration-200 hover:scale-[1.03] hover:border-fg-muted hover:bg-bg-overlay active:scale-[0.98];
+  }
+
+  .card {
+    @apply relative overflow-hidden rounded-2xl border border-border bg-bg-elevated/60 p-6 backdrop-blur transition-all duration-300 hover:border-fg-muted/50;
+  }
+
+  .kbd {
+    @apply inline-flex h-5 min-w-[20px] items-center justify-center rounded border border-border bg-bg-overlay px-1.5 font-mono text-[10px] font-medium text-fg-muted;
+  }
+
+  .glow-bg {
+    background: radial-gradient(
+        ellipse 80% 50% at 50% -20%,
+        rgba(99, 102, 241, 0.25),
+        transparent
+      ),
+      radial-gradient(
+        ellipse 60% 50% at 80% 50%,
+        rgba(192, 132, 252, 0.12),
+        transparent
+      ),
+      radial-gradient(
+        ellipse 60% 50% at 20% 80%,
+        rgba(244, 114, 182, 0.08),
+        transparent
+      );
+  }
+
+  .grid-bg {
+    background-image: linear-gradient(
+        to right,
+        rgba(255, 255, 255, 0.04) 1px,
+        transparent 1px
+      ),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse 80% 50% at 50% 0%, black 30%, transparent 80%);
+    -webkit-mask-image: radial-gradient(ellipse 80% 50% at 50% 0%, black 30%, transparent 80%);
+  }
+
+  .shimmer-bg {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(99, 102, 241, 0.08),
+      transparent
+    );
+    background-size: 200% 100%;
+  }
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: rgb(17 17 19);
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(39 39 42);
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(63 63 70);
+}

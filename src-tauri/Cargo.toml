@@ -1,0 +1,135 @@
+[package]
+name = "clipvault"
+description = "ClipVault - Privacy-first local clipboard manager for Windows"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "clipvault_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "clipvault"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[features]
+# Phase 6: feature-gated OCR. Disabling keeps the default binary small.
+ocr = []
+# Phase 5: portable mode (in-place DB storage next to the executable)
+portable = []
+# Phase 6: opt-in self-hosted sync
+sync = []
+# Phase 6: opt-in local HTTP receiver for browser extension
+http_receiver = []
+# Default: production-ready
+default = []
+
+[dependencies]
+# Tauri v2 core + plugins
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-store = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-opener = "2"
+
+# Database
+rusqlite = { version = "0.31", features = ["bundled"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.24"
+parking_lot = "0.12"
+
+# Async
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
+
+# Hashing
+blake3 = "1.5"
+
+# Image processing (thumbnails)
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
+# URL detection
+url = "2.5"
+
+# ZIP for import/export
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Errors
+anyhow = "1"
+thiserror = "1"
+
+# Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Path resolution
+dirs = "5"
+
+# IDs (ULID)
+ulid = "1.1"
+
+# Fuzzy search fallback
+strsim = "0.11"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Cross-platform clipboard for fallback (used when tauri-plugin-clipboard-manager is insufficient)
+arboard = "3.4"
+
+# Windows-only: source app tracking, CF_HDROP
+[target."cfg(windows)".dependencies]
+windows = { version = "0.58", features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_System_Threading",
+  "Win32_System_DataExchange",
+  "Win32_System_Console",
+  "Win32_Storage_Xps",
+  "Win32_UI_Shell",
+  "Win32_Graphics_Gdi",
+  "Win32_Security",
+  "Win32_System_ProcessStatus",
+  "Win32_System_JobObjects",
+  "Win32_System_Memory",
+  "Win32_System_Com",
+  "Win32_System_Ole",
+] }
+winreg = "0.52"
+
+# Dev / benches
+[dev-dependencies]
+criterion = "0.5"
+tempfile = "3.10"
+
+[[bench]]
+name = "search"
+harness = false
+
+[profile.dev]
+incremental = true
+opt-level = 1
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
