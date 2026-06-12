@@ -423,39 +423,43 @@ function ImagePreviewPopover({ clip }: { clip: Clip }) {
   useEffect(() => {
     if (!open || url || loading || !clip.image) return;
     let active = true;
-    let createdUrl: string | null = null;
     setLoading(true);
     setError(null);
-    api
-      .readImageFull(clip.image.path)
-      .then((bytes) => {
+    (async () => {
+      try {
+        // Tauri serializes `Vec<u8>` as `number[]` on the JS side. Build
+        // a Uint8Array from it explicitly so we get a real byte buffer
+        // we can wrap in a Blob, regardless of what Tauri hands us.
+        const raw = await api.readImageFull(clip.image!.path);
         if (!active) return;
-        const arr = bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : new Uint8Array(bytes);
+        if (!raw) {
+          throw new Error("readImageFull returned empty payload");
+        }
+        const arr = raw instanceof ArrayBuffer
+          ? new Uint8Array(raw)
+          : Array.isArray(raw)
+            ? Uint8Array.from(raw as number[])
+            : new Uint8Array(raw as ArrayLike<number>);
+        if (arr.byteLength === 0) {
+          throw new Error("readImageFull returned 0 bytes");
+        }
         const mime = clip.image?.mime === "image/png" ? "image/png" : "image/jpeg";
         const blob = new Blob([arr], { type: mime });
-        createdUrl = URL.createObjectURL(blob);
-        setUrl(createdUrl);
-      })
-      .catch((e) => {
-        // Surface the error to the user (and the dev console) instead of
-        // silently failing. The thumbnail is still rendered as the row's
-        // main preview, so the user always has *something* to see.
+        const objectUrl = URL.createObjectURL(blob);
+        if (active) setUrl(objectUrl);
+      } catch (e: any) {
         // eslint-disable-next-line no-console
         console.warn("[ImagePreviewPopover] failed to load full image", {
           path: clip.image?.path,
           error: e,
         });
         if (active) setError(String(e?.message ?? e));
-      })
-      .finally(() => {
+      } finally {
         if (active) setLoading(false);
-      });
+      }
+    })();
     return () => {
       active = false;
-      // Note: we DO NOT revoke the URL here on purpose — the same image may
-      // be hovered multiple times and we want to avoid re-fetching from
-      // disk. The URL is revoked when the component unmounts (parent
-      // `PaletteRow` changes clips).
     };
   }, [open, url, loading, clip.image]);
 

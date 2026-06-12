@@ -256,7 +256,12 @@ pub async fn read_image_full(
     state: State<'_, AppStateHandle>,
     rel_path: String,
 ) -> Result<Vec<u8>, String> {
-    crate::images::storage::load_full(&state.data_dir, &rel_path).map_err(err)
+    let res = crate::images::storage::load_full(&state.data_dir, &rel_path);
+    match &res {
+        Ok(bytes) => info!(target: "clipboard.image", "read_image_full ok path={} bytes={}", rel_path, bytes.len()),
+        Err(e) => info!(target: "clipboard.image", "read_image_full ERR path={} err={}", rel_path, e),
+    }
+    res.map_err(err)
 }
 
 #[tauri::command]
