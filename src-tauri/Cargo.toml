@@ -22,16 +22,21 @@ tauri-build = { version = "2", features = [] }
 [features]
 # OCR via Windows.Media.Ocr (Win10/11 built-in). No external model download.
 ocr = []
-# Portable mode (compile-time hint, in addition to the runtime `portable.flag`
-# file check). The runtime check works regardless of this feature flag.
+# Compile-time hint for portable mode. The runtime `portable.flag` file
+# check is what actually enables portable behavior at startup — this
+# feature is for distributions that want a "portable-only" build with no
+# flag file required. **It is intentionally OFF by default** because the
+# normal installed binary lives in `C:\Program Files\…` which the user
+# cannot write to; turning portable on there causes a confusing
+# "unable to open database file" at startup.
 portable = []
 # Opt-in self-hosted LAN sync
 sync = []
 # Opt-in local HTTP receiver (browser extension)
 http_receiver = []
-# Default: production-ready. OCR + portable are baked in; sync and the HTTP
-# receiver stay opt-in.
-default = ["ocr", "portable"]
+# Default: production-ready. OCR is baked in; portable stays runtime-only
+# (a `portable.flag` next to clipvault.exe).
+default = ["ocr"]
 
 [dependencies]
 # Tauri v2 core + plugins
