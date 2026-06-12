@@ -19,6 +19,12 @@ pub struct ClipFilter {
     pub since: Option<i64>,
     pub until: Option<i64>,
     pub tag: Option<String>,
+    /// Restrict to clips owned by this user id. `None` is treated as
+    /// "do not filter by user" (legacy behavior) and is normally only
+    /// passed by internal code paths that genuinely need cross-user
+    /// queries. The Tauri commands `search_clips` / `list_clips` always
+    /// resolve the active user from settings and pass it in.
+    pub user_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -942,6 +948,10 @@ pub fn search_clips(
             "clips.id IN (SELECT clip_id FROM tags WHERE tag = ?)".to_string(),
         );
         bind.push(Box::new(tag.clone()));
+    }
+    if let Some(uid) = filter.user_id.as_ref() {
+        where_clauses.push("clips.user_id = ?".to_string());
+        bind.push(Box::new(uid.clone()));
     }
     if let Some(c) = cursor {
         where_clauses.push("clips.created_at < ?".to_string());

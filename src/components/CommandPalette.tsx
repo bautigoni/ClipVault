@@ -414,6 +414,7 @@ function ImagePreviewPopover({ clip }: { clip: Clip }) {
   const [url, setUrl] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Lazy-load the full image the first time the user actually hovers the
@@ -424,6 +425,7 @@ function ImagePreviewPopover({ clip }: { clip: Clip }) {
     let active = true;
     let createdUrl: string | null = null;
     setLoading(true);
+    setError(null);
     api
       .readImageFull(clip.image.path)
       .then((bytes) => {
@@ -434,8 +436,16 @@ function ImagePreviewPopover({ clip }: { clip: Clip }) {
         createdUrl = URL.createObjectURL(blob);
         setUrl(createdUrl);
       })
-      .catch(() => {
-        /* silent — falls back to the small thumb */
+      .catch((e) => {
+        // Surface the error to the user (and the dev console) instead of
+        // silently failing. The thumbnail is still rendered as the row's
+        // main preview, so the user always has *something* to see.
+        // eslint-disable-next-line no-console
+        console.warn("[ImagePreviewPopover] failed to load full image", {
+          path: clip.image?.path,
+          error: e,
+        });
+        if (active) setError(String(e?.message ?? e));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -495,8 +505,13 @@ function ImagePreviewPopover({ clip }: { clip: Clip }) {
               draggable={false}
             />
           ) : !loading ? (
-            <div className="flex h-40 w-72 items-center justify-center text-xs text-fg-muted">
-              Couldn't load full image
+            <div className="flex h-40 w-72 flex-col items-center justify-center gap-1 px-3 text-center text-xs text-fg-muted">
+              <span>Couldn't load full image</span>
+              {error && (
+                <span className="max-w-full truncate text-[10px] opacity-70" title={error}>
+                  {error}
+                </span>
+              )}
             </div>
           ) : null}
           {clip.image && (

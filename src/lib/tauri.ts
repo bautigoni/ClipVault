@@ -11,6 +11,12 @@ export interface ClipFilter {
   favorites_only?: boolean;
   pinned_only?: boolean;
   tag?: string;
+  /**
+   * Optional override: when set, clips are filtered to this user id.
+   * When omitted (the normal case), the backend resolves the active
+   * user from settings automatically, so the UI doesn't have to know.
+   */
+  user_id?: string | null;
 }
 
 export const api = {

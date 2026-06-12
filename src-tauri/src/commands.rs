@@ -22,6 +22,7 @@ fn err<E: std::fmt::Display>(e: E) -> String {
 #[tauri::command]
 pub async fn search_clips(
     state: State<'_, AppStateHandle>,
+    app: AppHandle,
     query: Option<String>,
     limit: Option<usize>,
     cursor: Option<String>,
@@ -32,6 +33,9 @@ pub async fn search_clips(
     pinned_only: Option<bool>,
     tag: Option<String>,
 ) -> Result<SearchPage, String> {
+    let conn = state.db.get().map_err(err)?;
+    let active = settings::load_settings(&app);
+    let user_id = repo::resolve_active_user(&conn, active.active_user_id.as_deref()).ok();
     let filter = ClipFilter {
         query,
         kind,
@@ -42,6 +46,7 @@ pub async fn search_clips(
         since: None,
         until: None,
         tag,
+        user_id,
     };
     crate::search::search(&state.db, &filter, limit.unwrap_or(50), cursor.as_deref()).map_err(err)
 }
@@ -49,6 +54,7 @@ pub async fn search_clips(
 #[tauri::command]
 pub async fn list_clips(
     state: State<'_, AppStateHandle>,
+    app: AppHandle,
     limit: Option<usize>,
     cursor: Option<String>,
     source_app: Option<String>,
@@ -58,6 +64,9 @@ pub async fn list_clips(
     pinned_only: Option<bool>,
     tag: Option<String>,
 ) -> Result<SearchPage, String> {
+    let conn = state.db.get().map_err(err)?;
+    let active = settings::load_settings(&app);
+    let user_id = repo::resolve_active_user(&conn, active.active_user_id.as_deref()).ok();
     let filter = ClipFilter {
         query: None,
         kind,
@@ -68,6 +77,7 @@ pub async fn list_clips(
         since: None,
         until: None,
         tag,
+        user_id,
     };
     crate::search::search(&state.db, &filter, limit.unwrap_or(100), cursor.as_deref()).map_err(err)
 }
